@@ -3,6 +3,7 @@
 import json
 import os
 import sys
+import time
 from pathlib import Path
 
 import requests
@@ -10,7 +11,9 @@ from google import genai
 from google.genai.errors import APIError
 
 
-DEFAULT_MODEL = "gemini-3.8-flash"
+DEFAULT_MODEL = "gemini-2.5-flash-lite"
+MAX_GEMINI_ATTEMPTS = 5
+RETRYABLE_GEMINI_STATUS_CODES = {429, 503}
 
 
 def redact_sensitive_values(value, sensitive_mask):
@@ -84,7 +87,31 @@ def create_review(plan_changes):
         "values marked by Terraform have been redacted.\n\n"
         f"Terraform plan changes:\n{json.dumps(plan_changes, indent=2)}"
     )
-    response = client.models.generate_content(model=model, contents=prompt)
+    for attempt in range(1, MAX_GEMINI_ATTEMPTS + 1):
+        try:
+            response = client.models.generate_content(model=model, contents=prompt)
+            break
+        except APIError as error:
+            if error.code not in RETRYABLE_GEMINI_STATUS_CODES:
+                raise RuntimeError(
+                    f"Gemini API request failed with HTTP {error.code}; "
+                    "this error is not retried."
+                ) from error
+
+            if attempt == MAX_GEMINI_ATTEMPTS:
+                raise RuntimeError(
+                    f"Gemini remained temporarily unavailable after "
+                    f"{MAX_GEMINI_ATTEMPTS} attempts (HTTP {error.code})."
+                ) from error
+
+            wait_seconds = 2 ** attempt
+            print(
+                "Gemini temporarily unavailable. "
+                f"Retrying in {wait_seconds} seconds...",
+                flush=True,
+            )
+            time.sleep(wait_seconds)
+
     if not response.text or not response.text.strip():
         raise RuntimeError("Gemini returned an empty review.")
     return response.text
@@ -161,6 +188,12 @@ def main():
 if __name__ == "__main__":
     try:
         main()
-    except (RuntimeError, APIError) as error:
+    except APIError as error:
+        print(
+            f"Error: Gemini API request failed with HTTP {error.code}.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    except RuntimeError as error:
         print(f"Error: {error}", file=sys.stderr)
         sys.exit(1)
