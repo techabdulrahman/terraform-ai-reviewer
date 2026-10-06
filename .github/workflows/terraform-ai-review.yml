@@ -1,0 +1,89 @@
+name: Terraform AI Review
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+
+jobs:
+  plan:
+    name: Validate and plan Terraform changes
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.10.5
+
+      - name: Initialize Terraform
+        working-directory: terraform
+        run: terraform init -input=false
+
+      - name: Check Terraform formatting
+        working-directory: terraform
+        run: terraform fmt -check -recursive
+
+      - name: Validate Terraform configuration
+        working-directory: terraform
+        run: terraform validate
+
+      - name: Create Terraform plan
+        working-directory: terraform
+        run: terraform plan -input=false -no-color -out=plan.tfplan
+
+      - name: Export plan as JSON
+        working-directory: terraform
+        run: terraform show -json plan.tfplan > plan.json
+
+      - name: Upload Terraform plan
+        uses: actions/upload-artifact@v4
+        with:
+          name: terraform-plan
+          path: terraform/plan.json
+          if-no-files-found: error
+
+  review:
+    name: Review plan and comment on pull request
+    needs: plan
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+
+    steps:
+      # Use the base branch's reviewer so PR changes to reviewer.py are not
+      # executed in the job that receives the Gemini API key.
+      - name: Check out trusted reviewer
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          path: trusted-reviewer
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install trusted Python dependencies
+        run: python -m pip install -r trusted-reviewer/requirements.txt
+
+      - name: Download Terraform plan
+        uses: actions/download-artifact@v4
+        with:
+          name: terraform-plan
+          path: plan-artifact
+
+      - name: Review plan and comment on pull request
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GEMINI_MODEL: gemini-2.5-flash
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: python trusted-reviewer/reviewer.py plan-artifact/plan.json

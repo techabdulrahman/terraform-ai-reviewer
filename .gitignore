@@ -1,0 +1,17 @@
+# Terraform working files and generated plans
+terraform/.terraform/
+terraform/*.tfstate
+terraform/*.tfstate.*
+terraform/*.tfplan
+terraform/plan.json
+terraform/example.txt
+terraform/crash.log
+
+# Python files generated while running locally
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Local environment variables and secrets
+.env
