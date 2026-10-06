@@ -15,3 +15,18 @@ venv/
 
 # Local environment variables and secrets
 .env
+# Python
+.venv/
+__pycache__/
+*.pyc
+.env
+
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+tfplan
+tfplan.json
+terraform/tfplan
+terraform/tfplan.json
